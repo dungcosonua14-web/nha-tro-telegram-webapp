@@ -88,9 +88,9 @@ const App = {
         console.log('[Auth] Telegram user:', userId, user?.first_name);
 
         if (!userId) {
-            // If not in Telegram context (testing in browser), allow for dev
-            console.warn('[Auth] No Telegram user detected — running in dev mode');
-            return true;
+            // Not opened through Telegram → block access
+            console.warn('[Auth] No Telegram user detected — access blocked');
+            return false;
         }
 
         // Check primary owners
@@ -116,12 +116,20 @@ const App = {
 
     showAccessDenied() {
         const user = tg?.initDataUnsafe?.user;
-        const userId = user ? user.id : '—';
-        const userName = user ? (user.first_name || '') + ' ' + (user.last_name || '') : '—';
+        const userId = user ? user.id : null;
+        const userName = user ? (user.first_name || '') + ' ' + (user.last_name || '') : '';
 
         this.switchScreen('deniedScreen');
-        document.getElementById('deniedUserId').textContent = userId;
-        document.getElementById('deniedUserName').textContent = userName.trim();
+
+        // Different message for non-Telegram vs unauthorized Telegram user
+        if (!userId) {
+            document.getElementById('deniedTitle').textContent = 'Chỉ mở trong Telegram';
+            document.getElementById('deniedMessage').textContent = 'Vui lòng mở ứng dụng này qua Telegram Bot.';
+            document.getElementById('deniedIdBox').style.display = 'none';
+        } else {
+            document.getElementById('deniedUserId').textContent = userId;
+            document.getElementById('deniedUserName').textContent = userName.trim();
+        }
         refreshIcons();
     },
 

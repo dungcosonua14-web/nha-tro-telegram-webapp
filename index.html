@@ -168,11 +168,12 @@
                     style="width:72px;height:72px;border-radius:50%;background:var(--danger-light);display:flex;align-items:center;justify-content:center;margin-bottom:20px">
                     <i data-lucide="shield-x" style="width:36px;height:36px;color:var(--danger)"></i>
                 </div>
-                <h2 style="font-size:20px;font-weight:800;margin-bottom:8px">Truy cập bị từ chối</h2>
-                <p style="color:var(--tg-theme-hint-color);font-size:14px;margin-bottom:24px;max-width:280px">
+                <h2 id="deniedTitle" style="font-size:20px;font-weight:800;margin-bottom:8px">Truy cập bị từ chối</h2>
+                <p id="deniedMessage"
+                    style="color:var(--tg-theme-hint-color);font-size:14px;margin-bottom:24px;max-width:280px">
                     Web App này chỉ dành cho người được chủ trọ cấp quyền truy cập.
                 </p>
-                <div
+                <div id="deniedIdBox"
                     style="background:var(--tg-theme-secondary-bg-color);border-radius:12px;padding:16px 24px;margin-bottom:16px">
                     <div
                         style="font-size:11px;font-weight:700;color:var(--tg-theme-hint-color);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">
