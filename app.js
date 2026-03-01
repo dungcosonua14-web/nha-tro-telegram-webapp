@@ -319,6 +319,13 @@ const App = {
             chip.classList.toggle('selected', chip.dataset.roomId === roomId);
         });
 
+        // Update submit button with room name
+        const room = this.rooms.find(r => r.id === roomId);
+        const btnText = document.querySelector('#submitBtn span');
+        if (btnText && room) {
+            btnText.textContent = `Ghi phát sinh · ${room.name}`;
+        }
+
         // Haptic
         if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
 
