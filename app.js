@@ -241,7 +241,7 @@ const App = {
                     <div class="floor-rooms" style="${isOpen ? '' : 'display:none'}">
                         ${fRooms.map(room => {
                 const tenant = this.getTenantForRoom(room.id);
-                const tName = tenant ? this.truncate(tenant.name, 8) : '·';
+                const tName = tenant ? this.shortName(tenant.name) : '·';
                 return `
                             <div class="room-chip" data-room-id="${room.id}" onclick="App.selectRoom('${room.id}')">
                                 <div class="room-chip-name">${room.name}</div>
@@ -276,6 +276,14 @@ const App = {
     truncate(str, len) {
         if (!str) return '';
         return str.length > len ? str.substring(0, len) + '…' : str;
+    },
+
+    // Lấy 2 từ cuối tên (tên Việt Nam: họ đệm TÊN)
+    shortName(str) {
+        if (!str) return '';
+        const parts = str.trim().split(/\s+/);
+        if (parts.length <= 2) return str;
+        return parts.slice(-2).join(' ');
     },
 
     // ─── Render Services ───
