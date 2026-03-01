@@ -542,6 +542,9 @@ const App = {
                             <div class="history-item-detail">${room?.name || '—'} · SL: ${rs.quantity}${date ? ' · ' + date : ''}${source}</div>
                         </div>
                         <div class="history-item-amount">${this.formatVND(amount)}</div>
+                        <button class="history-item-del" onclick="App.deleteService('${rs.id}', '${rs.roomId}', '${rs.month}')">
+                            <i data-lucide="trash-2"></i>
+                        </button>
                     </div>`;
             });
         });
@@ -561,6 +564,32 @@ const App = {
             const svc = this.services.find(s => s.id === rs.serviceId);
             return sum + (svc ? svc.price * (rs.quantity || 1) : 0);
         }, 0);
+    },
+
+    // ─── Delete Service ───
+    async deleteService(id, roomId, month) {
+        if (!confirm('Xóa dịch vụ phát sinh này?')) return;
+
+        try {
+            // Delete from Firebase
+            await db.collection('roomServices').doc(id).delete();
+
+            // Remove from local data
+            this.roomServices = this.roomServices.filter(rs => rs.id !== id);
+
+            // Sync invoice for this room
+            await this.syncInvoiceForRoom(roomId, month);
+
+            // Haptic
+            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+
+            this.toast('Đã xóa phát sinh!', 'success');
+            this.updateStats();
+            this.renderHistory();
+        } catch (err) {
+            console.error('Delete failed:', err);
+            this.toast('Lỗi khi xóa!', 'error');
+        }
     },
 
     // ─── Utilities ───

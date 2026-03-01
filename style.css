@@ -746,6 +746,33 @@ body {
     flex-shrink: 0;
 }
 
+.history-item-del {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: var(--danger-light);
+    color: var(--danger);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: 4px;
+    transition: all 0.2s;
+}
+
+.history-item-del:active {
+    transform: scale(0.9);
+    background: var(--danger);
+    color: #fff;
+}
+
+.history-item-del svg {
+    width: 14px;
+    height: 14px;
+}
+
 .history-item-delete {
     position: absolute;
     right: 0;
