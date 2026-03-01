@@ -201,6 +201,8 @@ const App = {
     },
 
     // ─── Render Rooms ───
+    activeFloor: null,
+
     renderRooms() {
         const grid = document.getElementById('roomGrid');
         const occupiedRooms = this.rooms
@@ -224,20 +226,44 @@ const App = {
         let html = '';
         const floorEntries = Object.entries(floors).sort((a, b) => a[0] - b[0]);
 
+        // Default to first floor if none selected
+        if (!this.activeFloor) this.activeFloor = floorEntries[0]?.[0];
+
         floorEntries.forEach(([floor, fRooms]) => {
-            html += `<div class="floor-divider">Tầng ${floor}</div>`;
-            fRooms.forEach(room => {
+            const isOpen = this.activeFloor === floor;
+            html += `
+                <div class="floor-section ${isOpen ? 'open' : ''}" data-floor="${floor}">
+                    <div class="floor-header" onclick="App.toggleFloor('${floor}')">
+                        <span class="floor-header-label">Tầng ${floor}</span>
+                        <span class="floor-header-count">${fRooms.length} phòng</span>
+                        <i data-lucide="${isOpen ? 'chevron-up' : 'chevron-down'}" class="floor-header-icon"></i>
+                    </div>
+                    <div class="floor-rooms" style="${isOpen ? '' : 'display:none'}">
+                        ${fRooms.map(room => {
                 const tenant = this.getTenantForRoom(room.id);
                 const tName = tenant ? this.truncate(tenant.name, 8) : '·';
-                html += `
-                    <div class="room-chip" data-room-id="${room.id}" onclick="App.selectRoom('${room.id}')">
-                        <div class="room-chip-name">${room.name}</div>
-                        <div class="room-chip-tenant">${tName}</div>
-                    </div>`;
-            });
+                return `
+                            <div class="room-chip" data-room-id="${room.id}" onclick="App.selectRoom('${room.id}')">
+                                <div class="room-chip-name">${room.name}</div>
+                                <div class="room-chip-tenant">${tName}</div>
+                            </div>`;
+            }).join('')}
+                    </div>
+                </div>`;
         });
 
         grid.innerHTML = html;
+        refreshIcons();
+    },
+
+    toggleFloor(floor) {
+        this.activeFloor = this.activeFloor === floor ? null : floor;
+        this.renderRooms();
+        // Re-highlight selected room
+        if (this.selectedRoomId) {
+            const el = document.querySelector(`.room-chip[data-room-id="${this.selectedRoomId}"]`);
+            if (el) el.classList.add('active');
+        }
     },
 
     getTenantForRoom(roomId) {
