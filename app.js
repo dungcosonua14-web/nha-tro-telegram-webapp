@@ -86,11 +86,6 @@ const App = {
     switchScreen(screenId) {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
         document.getElementById(screenId).classList.add('active');
-        // Ensure loading screen is hidden
-        document.getElementById('loadingScreen').classList.remove('active');
-        if (screenId !== 'loadingScreen') {
-            document.getElementById(screenId).classList.add('active');
-        }
         refreshIcons();
     },
 
