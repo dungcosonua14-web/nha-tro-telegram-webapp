@@ -49,7 +49,7 @@
                     </div>
                 </div>
                 <div class="header-right">
-                    <button class="icon-btn" id="historyBtn" onclick="App.showHistory()">
+                    <button class="icon-btn" id="historyBtn" onclick="App.showHistory()" title="Lịch sử">
                         <i data-lucide="clock"></i>
                     </button>
                 </div>
@@ -140,6 +140,18 @@
                     </button>
                 </form>
             </div>
+
+            <!-- History button - big and clear -->
+            <button class="history-big-btn" onclick="App.showHistory()">
+                <div class="history-big-btn-icon">
+                    <i data-lucide="clock"></i>
+                </div>
+                <div class="history-big-btn-text">
+                    <span class="history-big-btn-title">📋 Lịch Sử Phát Sinh</span>
+                    <span class="history-big-btn-sub" id="historyBtnSub">Xem tất cả dịch vụ đã ghi</span>
+                </div>
+                <i data-lucide="chevron-right" class="history-big-btn-arrow"></i>
+            </button>
         </div>
 
         <!-- History screen -->
