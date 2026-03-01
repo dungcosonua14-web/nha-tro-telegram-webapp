@@ -527,6 +527,8 @@ const App = {
             items.forEach(rs => {
                 const room = this.rooms.find(r => r.id === rs.roomId);
                 const svc = this.services.find(s => s.id === rs.serviceId);
+                const tenant = this.getTenantForRoom(rs.roomId);
+                const tenantName = tenant ? ` · ${this.truncate(tenant.name, 10)}` : '';
                 const icon = svc?.icon || 'package';
                 const amount = (svc?.price || 0) * (rs.quantity || 1);
                 const date = rs.createdAt ? new Date(rs.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '';
@@ -539,7 +541,7 @@ const App = {
                         </div>
                         <div class="history-item-info">
                             <div class="history-item-title">${svc?.name || '—'}</div>
-                            <div class="history-item-detail">${room?.name || '—'} · SL: ${rs.quantity}${date ? ' · ' + date : ''}${source}</div>
+                            <div class="history-item-detail">${room?.name || '—'}${tenantName} · SL: ${rs.quantity}${date ? ' · ' + date : ''}${source}</div>
                         </div>
                         <div class="history-item-amount">${this.formatVND(amount)}</div>
                         <button class="history-item-del" onclick="App.deleteService('${rs.id}', '${rs.roomId}', '${rs.month}')">
