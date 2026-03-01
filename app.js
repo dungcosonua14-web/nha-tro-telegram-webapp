@@ -36,6 +36,10 @@ const App = {
     selectedServiceId: null,
     selectedServiceData: null,
 
+    // ─── Access Control ───
+    // Primary owners (same as bot .env OWNER_CHAT_IDS)
+    OWNER_IDS: ['320838772'],
+
     // ─── Init ───
     async init() {
         // Init Telegram Web App
@@ -46,7 +50,14 @@ const App = {
         }
 
         try {
-            // Load data from Firebase
+            // ─── Step 1: Check authorization ───
+            const authorized = await this.checkAuth();
+            if (!authorized) {
+                this.showAccessDenied();
+                return;
+            }
+
+            // ─── Step 2: Load data from Firebase ───
             await Promise.all([
                 this.loadCollection('rooms'),
                 this.loadCollection('services'),
@@ -66,6 +77,52 @@ const App = {
             console.error('Init failed:', err);
             this.toast('Lỗi kết nối Firebase!', 'error');
         }
+    },
+
+    // ─── Auth Check ───
+    async checkAuth() {
+        // Get Telegram user ID
+        const user = tg?.initDataUnsafe?.user;
+        const userId = user ? String(user.id) : null;
+
+        console.log('[Auth] Telegram user:', userId, user?.first_name);
+
+        if (!userId) {
+            // If not in Telegram context (testing in browser), allow for dev
+            console.warn('[Auth] No Telegram user detected — running in dev mode');
+            return true;
+        }
+
+        // Check primary owners
+        if (this.OWNER_IDS.includes(userId)) {
+            console.log('[Auth] ✅ Owner access granted');
+            return true;
+        }
+
+        // Check additional users from Firebase
+        try {
+            const snapshot = await db.collection('payment_bot_users').doc(userId).get();
+            if (snapshot.exists) {
+                console.log('[Auth] ✅ Authorized user access granted');
+                return true;
+            }
+        } catch (err) {
+            console.warn('[Auth] Firebase check error:', err);
+        }
+
+        console.log('[Auth] ❌ Access denied for user:', userId);
+        return false;
+    },
+
+    showAccessDenied() {
+        const user = tg?.initDataUnsafe?.user;
+        const userId = user ? user.id : '—';
+        const userName = user ? (user.first_name || '') + ' ' + (user.last_name || '') : '—';
+
+        this.switchScreen('deniedScreen');
+        document.getElementById('deniedUserId').textContent = userId;
+        document.getElementById('deniedUserName').textContent = userName.trim();
+        refreshIcons();
     },
 
     // ─── Firebase loaders ───
