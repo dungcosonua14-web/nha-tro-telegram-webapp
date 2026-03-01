@@ -169,12 +169,17 @@ const App = {
         const monthSel = document.getElementById('selMonth');
         const yearSel = document.getElementById('selYear');
 
+        // Default to NEXT month (invoices are created for next month)
+        const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const defaultMonth = nextDate.getMonth() + 1;
+        const defaultYear = nextDate.getFullYear();
+
         monthSel.innerHTML = '';
         for (let m = 1; m <= 12; m++) {
             const opt = document.createElement('option');
             opt.value = m;
             opt.textContent = `Tháng ${m}`;
-            if (m === now.getMonth() + 1) opt.selected = true;
+            if (m === defaultMonth) opt.selected = true;
             monthSel.appendChild(opt);
         }
 
@@ -184,7 +189,7 @@ const App = {
             const opt = document.createElement('option');
             opt.value = y;
             opt.textContent = y;
-            if (y === currentYear) opt.selected = true;
+            if (y === defaultYear) opt.selected = true;
             yearSel.appendChild(opt);
         }
     },
@@ -250,17 +255,18 @@ const App = {
     // ─── Render Services ───
     renderServices() {
         const list = document.getElementById('serviceList');
-        const svcs = this.services.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
+        // Only show quantity-based services (hide fixed/recurring services)
+        const svcs = this.services
+            .filter(s => s.chargeType === 'quantity')
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
 
         if (svcs.length === 0) {
-            list.innerHTML = '<div style="text-align:center;padding:16px;color:var(--tg-theme-hint-color);font-size:13px">Chưa có dịch vụ nào</div>';
+            list.innerHTML = '<div style="text-align:center;padding:16px;color:var(--tg-theme-hint-color);font-size:13px">Chưa có dịch vụ phát sinh nào</div>';
             return;
         }
 
         list.innerHTML = svcs.map(svc => {
             const icon = svc.icon || 'package';
-            const isFixed = svc.chargeType !== 'quantity';
-            const typeLabel = isFixed ? 'Cố định' : `Theo SL (${svc.unit})`;
             return `
                 <div class="service-item" data-service-id="${svc.id}" onclick="App.selectService('${svc.id}')">
                     <div class="service-item-icon">
@@ -268,7 +274,7 @@ const App = {
                     </div>
                     <div class="service-item-info">
                         <div class="service-item-name">${svc.name}</div>
-                        <div class="service-item-price">${this.formatVND(svc.price)}/${svc.unit} · ${typeLabel}</div>
+                        <div class="service-item-price">${this.formatVND(svc.price)}/${svc.unit}</div>
                     </div>
                     <div class="service-item-check">
                         <i data-lucide="check"></i>
