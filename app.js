@@ -518,35 +518,58 @@ const App = {
         let html = '';
         const now = new Date();
         const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const TWENTY_MIN = 20 * 60 * 1000;
 
         Object.entries(groups).forEach(([month, items]) => {
             const [y, m] = month.split('-');
             const label = month === curMonth ? 'Tháng này' : `Tháng ${parseInt(m)}/${y}`;
-            html += `<div class="history-month-label">${label} (${items.length})</div>`;
+            const groupTotal = items.reduce((sum, rs) => {
+                const svc = this.services.find(s => s.id === rs.serviceId);
+                return sum + (svc ? svc.price * (rs.quantity || 1) : 0);
+            }, 0);
+            html += `<div class="history-month-label">${label} · ${items.length} mục · ${this.formatVND(groupTotal)}</div>`;
 
             items.forEach(rs => {
                 const room = this.rooms.find(r => r.id === rs.roomId);
                 const svc = this.services.find(s => s.id === rs.serviceId);
                 const tenant = this.getTenantForRoom(rs.roomId);
-                const tenantName = tenant ? ` · ${this.truncate(tenant.name, 10)}` : '';
                 const icon = svc?.icon || 'package';
-                const amount = (svc?.price || 0) * (rs.quantity || 1);
-                const date = rs.createdAt ? new Date(rs.createdAt).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '';
-                const source = rs.source === 'telegram-webapp' ? ' · 📱' : '';
+                const unitPrice = svc?.price || 0;
+                const amount = unitPrice * (rs.quantity || 1);
+                const createdDate = rs.createdAt ? new Date(rs.createdAt) : null;
+                const dateStr = createdDate ? createdDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+                const timeStr = createdDate ? createdDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '';
+                const source = rs.source === 'telegram-webapp' ? '📱 Telegram' : '💻 Desktop';
+
+                // Check if within 20 minutes
+                const canDelete = createdDate && (now.getTime() - createdDate.getTime()) < TWENTY_MIN;
+                const minutesAgo = createdDate ? Math.floor((now.getTime() - createdDate.getTime()) / 60000) : null;
+                const timeAgoLabel = minutesAgo !== null && minutesAgo < 20 ? `${minutesAgo} phút trước` : '';
 
                 html += `
-                    <div class="history-item" data-id="${rs.id}">
-                        <div class="history-item-icon">
-                            <i data-lucide="${icon}"></i>
+                    <div class="history-card" data-id="${rs.id}">
+                        <div class="hc-header">
+                            <div class="hc-icon" style="background:${canDelete ? 'var(--primary)' : 'var(--tg-theme-hint-color)'}">
+                                <i data-lucide="${icon}"></i>
+                            </div>
+                            <div class="hc-title-area">
+                                <div class="hc-name">${svc?.name || '—'}</div>
+                                <div class="hc-source">${source}${timeAgoLabel ? ' · ' + timeAgoLabel : ''}</div>
+                            </div>
+                            <div class="hc-amount">${this.formatVND(amount)}</div>
                         </div>
-                        <div class="history-item-info">
-                            <div class="history-item-title">${svc?.name || '—'}</div>
-                            <div class="history-item-detail">${room?.name || '—'}${tenantName} · SL: ${rs.quantity}${date ? ' · ' + date : ''}${source}</div>
+                        <div class="hc-details">
+                            <div class="hc-row"><span>🏠 Phòng</span><strong>${room?.name || '—'}</strong></div>
+                            <div class="hc-row"><span>👤 Người thuê</span><strong>${tenant?.name || '—'}</strong></div>
+                            <div class="hc-row"><span>📦 Số lượng</span><strong>${rs.quantity} × ${this.formatVND(unitPrice)}/${svc?.unit || ''}</strong></div>
+                            <div class="hc-row"><span>📅 Ngày ghi</span><strong>${dateStr}${timeStr ? ' · ' + timeStr : ''}</strong></div>
                         </div>
-                        <div class="history-item-amount">${this.formatVND(amount)}</div>
-                        <button class="history-item-del" onclick="App.deleteService('${rs.id}', '${rs.roomId}', '${rs.month}')">
-                            <i data-lucide="trash-2"></i>
-                        </button>
+                        ${canDelete ? `
+                        <div class="hc-actions">
+                            <button class="hc-del-btn" onclick="App.deleteService('${rs.id}', '${rs.roomId}', '${rs.month}')">
+                                <i data-lucide="trash-2"></i> Xóa (còn ${20 - minutesAgo}p)
+                            </button>
+                        </div>` : ''}
                     </div>`;
             });
         });
@@ -554,7 +577,6 @@ const App = {
         container.innerHTML = html;
 
         // Update subtitle
-        const curMonthItems = groups[curMonth] || [];
         document.getElementById('historySubtitle').textContent =
             `${onetime.length} phát sinh · ${this.formatVND(this.calcTotal(onetime))}`;
 
@@ -568,23 +590,28 @@ const App = {
         }, 0);
     },
 
-    // ─── Delete Service ───
+    // ─── Delete Service (only within 20 minutes) ───
     async deleteService(id, roomId, month) {
+        // Double-check time limit
+        const rs = this.roomServices.find(r => r.id === id);
+        if (rs?.createdAt) {
+            const age = Date.now() - new Date(rs.createdAt).getTime();
+            if (age > 20 * 60 * 1000) {
+                this.toast('Đã quá 20 phút, không thể xóa!', 'warning');
+                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+                this.renderHistory();
+                return;
+            }
+        }
+
         if (!confirm('Xóa dịch vụ phát sinh này?')) return;
 
         try {
-            // Delete from Firebase
             await db.collection('roomServices').doc(id).delete();
-
-            // Remove from local data
             this.roomServices = this.roomServices.filter(rs => rs.id !== id);
-
-            // Sync invoice for this room
             await this.syncInvoiceForRoom(roomId, month);
 
-            // Haptic
             if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-
             this.toast('Đã xóa phát sinh!', 'success');
             this.updateStats();
             this.renderHistory();
