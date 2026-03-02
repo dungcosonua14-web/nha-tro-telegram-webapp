@@ -1,9 +1,8 @@
 /* =============================================
-   NHÀ TRỌ EDEN - Telegram Web App
-   Ghi dịch vụ phát sinh — Firebase connected
+   NHÀ TRỌ EDEN - Telegram Web App JS
+   4-Tab: Dashboard | Phòng | Người Thuê | Hóa Đơn
    ============================================= */
 
-// Firebase config (same as desktop app)
 const firebaseConfig = {
     apiKey: "AIzaSyApSkAZZL9y5fYbF7h8yIaTtssCGNoMMQU",
     authDomain: "nhatroeden.firebaseapp.com",
@@ -17,129 +16,114 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// ─── Telegram Web App ───
 const tg = window.Telegram?.WebApp;
 
-// Safe Lucide icons refresh
 function refreshIcons() {
     if (window.lucide && typeof lucide.createIcons === 'function') {
         lucide.createIcons();
     }
 }
 
-const App = {
-    rooms: [],
-    services: [],
-    roomServices: [],
-    settings: {},
-    selectedRoomId: null,
-    selectedServiceId: null,
-    selectedServiceData: null,
+function formatVND(amount) {
+    const n = Number(amount) || 0;
+    return new Intl.NumberFormat('vi-VN').format(n) + '₫';
+}
 
-    // ─── Access Control ───
-    // Primary owners (same as bot .env OWNER_CHAT_IDS)
+function formatMonth(m) {
+    if (!m) return '—';
+    const [y, mo] = m.split('-');
+    return `Tháng ${parseInt(mo)}/${y}`;
+}
+
+const App = {
+    // ─── Data ───
+    rooms: [],
+    tenants: [],
+    invoices: [],
+    settings: {},
+
+    // ─── State ───
+    currentTab: 'dashboard',
+    tenantFilter: 'all',
+    tenantSearch: '',
+    invoiceMonth: null,
+
     OWNER_IDS: ['320838772'],
 
     // ─── Init ───
     async init() {
-        // Init Telegram Web App
-        if (tg) {
-            tg.ready();
-            tg.expand();
-            tg.enableClosingConfirmation();
-        }
+        if (tg) { tg.ready(); tg.expand(); }
 
         try {
-            // ─── Step 1: Check authorization ───
             const authorized = await this.checkAuth();
-            if (!authorized) {
-                this.showAccessDenied();
-                return;
-            }
+            if (!authorized) { this.showAccessDenied(); return; }
 
-            // ─── Step 2: Load data from Firebase ───
+            // Load all data
             await Promise.all([
                 this.loadCollection('rooms'),
-                this.loadCollection('services'),
-                this.loadCollection('roomServices'),
+                this.loadCollection('tenants'),
+                this.loadCollection('invoices'),
                 this.loadSettings()
             ]);
 
-            this.renderMonthPicker();
-            this.renderRooms();
-            this.renderServices();
-            this.updateStats();
+            // Set default invoice month to current month
+            const now = new Date();
+            this.invoiceMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-            // Show main screen
+            // Show header user info
+            const user = tg?.initDataUnsafe?.user;
+            if (user) {
+                const el = document.getElementById('headerUser');
+                if (el) el.textContent = user.first_name || 'User';
+            }
+
+            // Update header subtitle
+            const occupied = this.rooms.filter(r => r.status === 'occupied').length;
+            const sub = document.getElementById('headerSubtitle');
+            if (sub) sub.textContent = `${occupied} phòng đang thuê`;
+
             this.switchScreen('mainScreen');
-            refreshIcons();
+            this.switchTab('dashboard');
         } catch (err) {
             console.error('Init failed:', err);
-            this.toast('Lỗi kết nối Firebase!', 'error');
         }
     },
 
-    // ─── Auth Check ───
+    // ─── Auth ───
     async checkAuth() {
-        // Get Telegram user ID
         const user = tg?.initDataUnsafe?.user;
         const userId = user ? String(user.id) : null;
-
-        console.log('[Auth] Telegram user:', userId, user?.first_name);
-
-        if (!userId) {
-            // Not opened through Telegram → block access
-            console.warn('[Auth] No Telegram user detected — access blocked');
-            return false;
-        }
-
-        // Check primary owners
-        if (this.OWNER_IDS.includes(userId)) {
-            console.log('[Auth] ✅ Owner access granted');
-            return true;
-        }
-
-        // Check additional users from Firebase
+        if (!userId) return false;
+        if (this.OWNER_IDS.includes(userId)) return true;
         try {
-            const snapshot = await db.collection('payment_bot_users').doc(userId).get();
-            if (snapshot.exists) {
-                console.log('[Auth] ✅ Authorized user access granted');
-                return true;
-            }
-        } catch (err) {
-            console.warn('[Auth] Firebase check error:', err);
-        }
-
-        console.log('[Auth] ❌ Access denied for user:', userId);
+            const snap = await db.collection('payment_bot_users').doc(userId).get();
+            if (snap.exists) return true;
+        } catch (e) { }
         return false;
     },
 
     showAccessDenied() {
         const user = tg?.initDataUnsafe?.user;
         const userId = user ? user.id : null;
-        const userName = user ? (user.first_name || '') + ' ' + (user.last_name || '') : '';
-
+        document.getElementById('deniedScreen').style.display = 'flex';
         this.switchScreen('deniedScreen');
-
-        // Different message for non-Telegram vs unauthorized Telegram user
         if (!userId) {
             document.getElementById('deniedTitle').textContent = 'Chỉ mở trong Telegram';
             document.getElementById('deniedMessage').textContent = 'Vui lòng mở ứng dụng này qua Telegram Bot.';
             document.getElementById('deniedIdBox').style.display = 'none';
         } else {
             document.getElementById('deniedUserId').textContent = userId;
-            document.getElementById('deniedUserName').textContent = userName.trim();
+            document.getElementById('deniedUserName').textContent = (user.first_name || '') + ' ' + (user.last_name || '');
         }
         refreshIcons();
     },
 
-    // ─── Firebase loaders ───
+    // ─── Firebase ───
     async loadCollection(name) {
-        const snapshot = await db.collection(name).get();
+        const snap = await db.collection(name).get();
         const items = [];
-        snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+        snap.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
         this[name] = items;
-        console.log(`[Firebase] Loaded ${name}: ${items.length} items`);
     },
 
     async loadSettings() {
@@ -147,562 +131,440 @@ const App = {
         this.settings = doc.exists ? doc.data() : {};
     },
 
-    // ─── Screen management ───
-    switchScreen(screenId) {
+    // ─── Screen ───
+    switchScreen(id) {
         document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-        document.getElementById(screenId).classList.add('active');
+        document.getElementById(id).classList.add('active');
         refreshIcons();
     },
 
-    showMain() {
-        this.switchScreen('mainScreen');
+    // ─── Tabs ───
+    switchTab(tab) {
+        this.currentTab = tab;
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+        const content = document.getElementById('tabContent');
+        switch (tab) {
+            case 'dashboard': content.innerHTML = this.renderDashboard(); break;
+            case 'rooms': content.innerHTML = this.renderRooms(); break;
+            case 'tenants': content.innerHTML = this.renderTenants(); break;
+            case 'invoices': content.innerHTML = this.renderInvoices(); break;
+        }
+        refreshIcons();
     },
 
-    showHistory() {
-        this.renderHistory();
-        this.switchScreen('historyScreen');
-    },
-
-    // ─── Render Month Picker ───
-    renderMonthPicker() {
+    // ══════════════════════════════
+    //  DASHBOARD
+    // ══════════════════════════════
+    renderDashboard() {
         const now = new Date();
-        const monthSel = document.getElementById('selMonth');
-        const yearSel = document.getElementById('selYear');
+        const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const monthInvs = this.invoices.filter(i => i.month === curMonth);
+        const getTotal = i => (i.roomPrice || 0) + (i.electricCost || 0) + (i.waterCost || 0) + (i.serviceCost || 0);
 
-        // Default to NEXT month (invoices are created for next month)
-        const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        const defaultMonth = nextDate.getMonth() + 1;
-        const defaultYear = nextDate.getFullYear();
+        const revenue = monthInvs.reduce((s, i) => s + getTotal(i), 0);
+        const paid = monthInvs.filter(i => i.paid).length;
+        const unpaid = monthInvs.filter(i => !i.paid);
+        const occupied = this.rooms.filter(r => r.status === 'occupied').length;
+        const available = this.rooms.filter(r => r.status === 'available').length;
+        const activeT = this.tenants.filter(t => t.roomId && !t.moveOutDate).length;
 
-        monthSel.innerHTML = '';
-        for (let m = 1; m <= 12; m++) {
-            const opt = document.createElement('option');
-            opt.value = m;
-            opt.textContent = `Tháng ${m}`;
-            if (m === defaultMonth) opt.selected = true;
-            monthSel.appendChild(opt);
-        }
+        const unpaidItems = unpaid.slice(0, 5).map(i => {
+            const room = this.rooms.find(r => r.id === i.roomId);
+            const t = this.tenants.find(t => t.roomId === i.roomId && !t.moveOutDate) ||
+                (i.tenantNames ? { name: i.tenantNames } : null);
+            return `
+            <div class="unpaid-item">
+                <div class="unpaid-dot"></div>
+                <div class="unpaid-info">
+                    <div class="unpaid-room">${room?.name || '—'}</div>
+                    <div class="unpaid-month">${t?.name || '—'} · ${formatMonth(i.month)}</div>
+                </div>
+                <div class="unpaid-amount">${formatVND(getTotal(i))}</div>
+            </div>`;
+        }).join('');
 
-        yearSel.innerHTML = '';
-        const currentYear = now.getFullYear();
-        for (let y = currentYear + 1; y >= currentYear - 2; y--) {
-            const opt = document.createElement('option');
-            opt.value = y;
-            opt.textContent = y;
-            if (y === defaultYear) opt.selected = true;
-            yearSel.appendChild(opt);
-        }
+        return `
+        <div style="padding-bottom:8px">
+            <div class="dash-hero">
+                <div class="dash-hero-label">Doanh thu ${formatMonth(curMonth)}</div>
+                <div class="dash-hero-amount">${formatVND(revenue)}</div>
+                <div class="dash-hero-sub">${monthInvs.length} hóa đơn · ${paid} đã thu</div>
+                <div class="dash-hero-badge">
+                    <i data-lucide="trending-up" style="width:12px;height:12px"></i>
+                    ${Math.round(paid / (monthInvs.length || 1) * 100)}% hoàn thành
+                </div>
+            </div>
+
+            <div class="dash-stats-row">
+                <div class="dash-stat-card">
+                    <div class="dash-stat-icon" style="background:var(--primary-light)">
+                        <i data-lucide="door-open" style="color:var(--primary)"></i>
+                    </div>
+                    <div>
+                        <div class="dash-stat-val">${occupied}</div>
+                        <div class="dash-stat-lbl">Phòng đang thuê</div>
+                    </div>
+                </div>
+                <div class="dash-stat-card">
+                    <div class="dash-stat-icon" style="background:var(--success-light)">
+                        <i data-lucide="circle-check" style="color:var(--success)"></i>
+                    </div>
+                    <div>
+                        <div class="dash-stat-val">${available}</div>
+                        <div class="dash-stat-lbl">Phòng trống</div>
+                    </div>
+                </div>
+                <div class="dash-stat-card">
+                    <div class="dash-stat-icon" style="background:var(--info-light)">
+                        <i data-lucide="users" style="color:var(--info)"></i>
+                    </div>
+                    <div>
+                        <div class="dash-stat-val">${activeT}</div>
+                        <div class="dash-stat-lbl">Người thuê</div>
+                    </div>
+                </div>
+                <div class="dash-stat-card">
+                    <div class="dash-stat-icon" style="background:var(--danger-light)">
+                        <i data-lucide="alert-circle" style="color:var(--danger)"></i>
+                    </div>
+                    <div>
+                        <div class="dash-stat-val">${unpaid.length}</div>
+                        <div class="dash-stat-lbl">Chưa thanh toán</div>
+                    </div>
+                </div>
+            </div>
+
+            ${unpaid.length > 0 ? `
+            <div class="dash-section">
+                <div class="dash-section-title">
+                    <i data-lucide="alert-triangle"></i>
+                    Chưa thanh toán tháng này
+                </div>
+                ${unpaidItems}
+                ${unpaid.length > 5 ? `<div style="text-align:center;font-size:12px;color:var(--text-muted);padding:8px">và ${unpaid.length - 5} phòng khác...</div>` : ''}
+            </div>` : `
+            <div class="dash-section">
+                <div style="text-align:center;padding:24px;color:var(--success);font-size:15px;font-weight:700">
+                    🎉 Tất cả đã thanh toán tháng này!
+                </div>
+            </div>`}
+        </div>`;
     },
 
-    getSelectedMonth() {
-        const m = parseInt(document.getElementById('selMonth').value);
-        const y = parseInt(document.getElementById('selYear').value);
-        return `${y}-${String(m).padStart(2, '0')}`;
-    },
-
-    // ─── Render Rooms ───
-    activeFloor: null,
-
+    // ══════════════════════════════
+    //  ROOMS
+    // ══════════════════════════════
     renderRooms() {
-        const grid = document.getElementById('roomGrid');
-        const occupiedRooms = this.rooms
-            .filter(r => r.status === 'occupied')
-            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi', { numeric: true }));
+        const rooms = [...this.rooms].sort((a, b) =>
+            (a.name || '').localeCompare(b.name || '', 'vi', { numeric: true }));
 
-        if (occupiedRooms.length === 0) {
-            grid.innerHTML = '<div style="text-align:center;padding:16px;color:var(--tg-theme-hint-color);font-size:13px">Chưa có phòng đang thuê</div>';
-            return;
-        }
+        const occupied = rooms.filter(r => r.status === 'occupied').length;
+        const available = rooms.filter(r => r.status === 'available').length;
 
         // Group by floor
         const floors = {};
-        occupiedRooms.forEach(r => {
-            const num = (r.name || '').replace(/[^0-9]/g, '');
-            const floor = num.length >= 2 ? num[0] : '?';
-            if (!floors[floor]) floors[floor] = [];
-            floors[floor].push(r);
+        rooms.forEach(r => {
+            const fl = r.floor || '?';
+            if (!floors[fl]) floors[fl] = [];
+            floors[fl].push(r);
         });
 
-        let html = '';
-        const floorEntries = Object.entries(floors).sort((a, b) => a[0] - b[0]);
+        const floorHTML = Object.entries(floors)
+            .sort((a, b) => Number(a[0]) - Number(b[0]))
+            .map(([floor, fRooms]) => {
+                const cards = fRooms.map(room => {
+                    const tenants = this.tenants.filter(t => t.roomId === room.id && !t.moveOutDate);
+                    const tNames = tenants.map(t => t.name).join(', ') || 'Trống';
+                    const curMonth = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`; })();
+                    const inv = this.invoices.find(i => i.roomId === room.id && i.month === curMonth);
+                    const paidBadge = inv ? (inv.paid
+                        ? `<span style="font-size:10px;background:var(--success-light);color:var(--success);padding:2px 7px;border-radius:10px;font-weight:700">Đã TT</span>`
+                        : `<span style="font-size:10px;background:var(--danger-light);color:var(--danger);padding:2px 7px;border-radius:10px;font-weight:700">Chưa TT</span>`) : '';
 
-        // Default to first floor if none selected
-        if (!this.activeFloor) this.activeFloor = floorEntries[0]?.[0];
+                    return `
+                    <div class="room-card-item">
+                        <div class="room-status-dot ${room.status}"></div>
+                        <div class="room-card-body">
+                            <div class="room-card-name">${room.name} ${paidBadge}</div>
+                            <div class="room-card-meta">
+                                <span>Tầng ${room.floor}</span>
+                                <span>·</span>
+                                <span>${room.area} m²</span>
+                            </div>
+                            <div class="room-card-tenants">
+                                <i data-lucide="user" style="width:11px;height:11px"></i> ${tNames}
+                            </div>
+                        </div>
+                        <div class="room-card-price">${formatVND(room.price)}</div>
+                    </div>`;
+                }).join('');
 
-        floorEntries.forEach(([floor, fRooms]) => {
-            const isOpen = this.activeFloor === floor;
-            html += `
-                <div class="floor-section ${isOpen ? 'open' : ''}" data-floor="${floor}">
-                    <div class="floor-header" onclick="App.toggleFloor('${floor}')">
-                        <span class="floor-header-label">Tầng ${floor}</span>
-                        <span class="floor-header-count">${fRooms.length} phòng</span>
-                        <i data-lucide="${isOpen ? 'chevron-up' : 'chevron-down'}" class="floor-header-icon"></i>
-                    </div>
-                    <div class="floor-rooms" style="${isOpen ? '' : 'display:none'}">
-                        ${fRooms.map(room => {
-                const tenant = this.getTenantForRoom(room.id);
-                const tName = tenant ? this.shortName(tenant.name) : '·';
                 return `
-                            <div class="room-chip" data-room-id="${room.id}" onclick="App.selectRoom('${room.id}')">
-                                <div class="room-chip-name">${room.name}</div>
-                                <div class="room-chip-tenant">${tName}</div>
-                            </div>`;
-            }).join('')}
+                <div class="floor-group">
+                    <div class="floor-label">
+                        <i data-lucide="building-2" style="width:12px;height:12px"></i>
+                        Tầng ${floor}
                     </div>
+                    ${cards}
                 </div>`;
-        });
+            }).join('');
 
-        grid.innerHTML = html;
-        refreshIcons();
+        return `
+        <div class="rooms-wrap">
+            <div class="room-summary-pills">
+                <div class="room-pill occupied">
+                    <div class="room-pill-val">${occupied}</div>
+                    <div class="room-pill-lbl">Đang thuê</div>
+                </div>
+                <div class="room-pill available">
+                    <div class="room-pill-val">${available}</div>
+                    <div class="room-pill-lbl">Còn trống</div>
+                </div>
+                <div class="room-pill" style="flex:1;border-color:var(--border)">
+                    <div class="room-pill-val" style="color:var(--text)">${rooms.length}</div>
+                    <div class="room-pill-lbl">Tổng phòng</div>
+                </div>
+            </div>
+            ${floorHTML || '<div class="empty-state"><i data-lucide="door-open"></i><p>Chưa có phòng nào</p></div>'}
+        </div>`;
     },
 
-    toggleFloor(floor) {
-        this.activeFloor = this.activeFloor === floor ? null : floor;
-        this.renderRooms();
-        // Re-highlight selected room
-        if (this.selectedRoomId) {
-            const el = document.querySelector(`.room-chip[data-room-id="${this.selectedRoomId}"]`);
-            if (el) el.classList.add('active');
+    // ══════════════════════════════
+    //  TENANTS
+    // ══════════════════════════════
+    renderTenants() {
+        const hasRoom = this.tenants.filter(t => t.roomId && !t.moveOutDate);
+        const noRoom = this.tenants.filter(t => !t.roomId && !t.moveOutDate);
+        const checkedOut = this.tenants.filter(t => t.moveOutDate);
+
+        const tabs = [
+            { key: 'all', label: 'Tất cả', count: this.tenants.length },
+            { key: 'hasRoom', label: 'Đang thuê', count: hasRoom.length },
+            { key: 'noRoom', label: 'Chưa gán', count: noRoom.length },
+            { key: 'checkedOut', label: 'Đã trả', count: checkedOut.length },
+        ];
+
+        const tabsHTML = tabs.map(t => `
+            <button class="tenant-tab-btn ${this.tenantFilter === t.key ? 'active' : ''}"
+                    onclick="App.setTenantFilter('${t.key}')">
+                ${t.label}
+                <span class="tenant-tab-count">${t.count}</span>
+            </button>`).join('');
+
+        return `
+        <div class="tenants-wrap">
+            <div class="search-box">
+                <span class="search-icon"><i data-lucide="search"></i></span>
+                <input type="text" placeholder="Tên, SĐT, biển số xe..."
+                       value="${this.tenantSearch}"
+                       oninput="App.onTenantSearch(this.value)">
+            </div>
+            <div class="tenant-tabs">${tabsHTML}</div>
+            <div id="tenantCards">${this.renderTenantCards()}</div>
+        </div>`;
+    },
+
+    renderTenantCards() {
+        let tenants = [...this.tenants];
+
+        // Filter by tab
+        if (this.tenantFilter === 'hasRoom') tenants = tenants.filter(t => t.roomId && !t.moveOutDate);
+        else if (this.tenantFilter === 'noRoom') tenants = tenants.filter(t => !t.roomId && !t.moveOutDate);
+        else if (this.tenantFilter === 'checkedOut') tenants = tenants.filter(t => t.moveOutDate);
+
+        // Filter by search
+        const q = (this.tenantSearch || '').toLowerCase().trim();
+        if (q) {
+            tenants = tenants.filter(t =>
+                (t.name || '').toLowerCase().includes(q) ||
+                (t.phone || '').includes(q) ||
+                (t.vehiclePlate || '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(q.replace(/[^a-z0-9]/g, ''))
+            );
         }
-    },
 
-    getTenantForRoom(roomId) {
-        // tenants are loaded along with rooms if available; 
-        // fallback: use roomServices or inline. Let's load separately.
-        if (!this.tenants) return null;
-        return this.tenants.find(t => t.roomId === roomId);
-    },
-
-    truncate(str, len) {
-        if (!str) return '';
-        return str.length > len ? str.substring(0, len) + '…' : str;
-    },
-
-    // Lấy 2 từ cuối tên (tên Việt Nam: họ đệm TÊN)
-    shortName(str) {
-        if (!str) return '';
-        const parts = str.trim().split(/\s+/);
-        if (parts.length <= 2) return str;
-        return parts.slice(-2).join(' ');
-    },
-
-    // ─── Render Services ───
-    renderServices() {
-        const list = document.getElementById('serviceList');
-        // Only show quantity-based services (hide fixed/recurring services)
-        const svcs = this.services
-            .filter(s => s.chargeType === 'quantity')
-            .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi'));
-
-        if (svcs.length === 0) {
-            list.innerHTML = '<div style="text-align:center;padding:16px;color:var(--tg-theme-hint-color);font-size:13px">Chưa có dịch vụ phát sinh nào</div>';
-            return;
+        if (tenants.length === 0) {
+            return `<div class="empty-state">
+                <i data-lucide="user-x"></i>
+                <p>${q ? 'Không tìm thấy kết quả' : 'Không có người thuê nào'}</p>
+            </div>`;
         }
 
-        list.innerHTML = svcs.map(svc => {
-            const icon = svc.icon || 'package';
+        return tenants.map(t => {
+            const room = this.rooms.find(r => r.id === t.roomId);
+            let statusBadge, avatarClass = '';
+
+            if (t.moveOutDate) {
+                statusBadge = `<span class="tenant-status-badge checkout"><i data-lucide="log-out"></i> Đã trả phòng</span>`;
+                avatarClass = 'checkout';
+            } else if (t.roomId) {
+                statusBadge = `<span class="tenant-status-badge active"><i data-lucide="check-circle"></i> Đang thuê</span>`;
+            } else {
+                statusBadge = `<span class="tenant-status-badge nroom"><i data-lucide="alert-circle"></i> Chưa gán phòng</span>`;
+            }
+
+            const initial = (t.name || '?').trim()[0].toUpperCase();
+            const roomBadge = room
+                ? `<span class="tenant-room-badge"><i data-lucide="door-open"></i>${room.name}</span>`
+                : '';
+
+            const plateBadge = t.vehiclePlate
+                ? `<span class="plate-badge"><i data-lucide="bike"></i>${t.vehiclePlate}</span>`
+                : '<span style="color:var(--text-muted);font-size:12px">—</span>';
+
+            const moveoutBar = t.moveOutDate
+                ? `<div class="tenant-moveout-bar">
+                    <i data-lucide="calendar-x"></i>
+                    Ngày trả phòng: ${new Date(t.moveOutDate).toLocaleDateString('vi-VN')}
+                   </div>` : '';
+
             return `
-                <div class="service-item" data-service-id="${svc.id}" onclick="App.selectService('${svc.id}')">
-                    <div class="service-item-icon">
-                        <i data-lucide="${icon}"></i>
+            <div class="tenant-card">
+                <div class="tenant-card-top">
+                    <div class="tenant-avatar ${avatarClass}">${initial}</div>
+                    <div class="tenant-info">
+                        <div class="tenant-name">${t.name}</div>
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
+                            ${roomBadge}
+                            ${statusBadge}
+                        </div>
                     </div>
-                    <div class="service-item-info">
-                        <div class="service-item-name">${svc.name}</div>
-                        <div class="service-item-price">${this.formatVND(svc.price)}/${svc.unit}</div>
+                </div>
+
+                <div class="tenant-card-grid">
+                    <div class="tenant-info-row">
+                        <div class="tenant-info-lbl"><i data-lucide="phone"></i> SĐT</div>
+                        <div class="tenant-info-val">${t.phone || '—'}</div>
                     </div>
-                    <div class="service-item-check">
-                        <i data-lucide="check"></i>
+                    <div class="tenant-info-row">
+                        <div class="tenant-info-lbl"><i data-lucide="credit-card"></i> CCCD</div>
+                        <div class="tenant-info-val">${t.idCard || '—'}</div>
                     </div>
-                </div>`;
+                    <div class="tenant-info-row" style="grid-column:1/-1">
+                        <div class="tenant-info-lbl"><i data-lucide="bike"></i> Biển số xe</div>
+                        <div class="tenant-info-val">${plateBadge}</div>
+                    </div>
+                    ${t.moveInDate ? `
+                    <div class="tenant-info-row">
+                        <div class="tenant-info-lbl"><i data-lucide="calendar"></i> Ngày vào</div>
+                        <div class="tenant-info-val">${new Date(t.moveInDate).toLocaleDateString('vi-VN')}</div>
+                    </div>` : ''}
+                </div>
+                ${moveoutBar}
+            </div>`;
         }).join('');
     },
 
-    // ─── Selection handlers ───
-    selectRoom(roomId) {
-        this.selectedRoomId = roomId;
-        document.getElementById('selectedRoom').value = roomId;
-
-        // Update visual
-        document.querySelectorAll('.room-chip').forEach(chip => {
-            chip.classList.toggle('selected', chip.dataset.roomId === roomId);
-        });
-
-        // Update submit button with room name
-        const room = this.rooms.find(r => r.id === roomId);
-        const btnText = document.querySelector('#submitBtn span');
-        if (btnText && room) {
-            btnText.textContent = `Ghi phát sinh · ${room.name}`;
-        }
-
-        // Haptic
-        if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
-
-        this.checkFormReady();
+    setTenantFilter(filter) {
+        this.tenantFilter = filter;
+        this.switchTab('tenants');
     },
 
-    selectService(serviceId) {
-        this.selectedServiceId = serviceId;
-        this.selectedServiceData = this.services.find(s => s.id === serviceId);
-        document.getElementById('selectedService').value = serviceId;
-
-        // Update visual
-        document.querySelectorAll('.service-item').forEach(item => {
-            item.classList.toggle('selected', item.dataset.serviceId === serviceId);
-        });
-
-        // Show/hide quantity
-        const qtyGroup = document.getElementById('qtyGroup');
-        if (this.selectedServiceData) {
-            const isFixed = this.selectedServiceData.chargeType !== 'quantity';
-            if (isFixed) {
-                qtyGroup.style.display = 'none';
-                document.getElementById('qtyInput').value = 1;
-            } else {
-                qtyGroup.style.display = 'block';
-                document.getElementById('qtyUnit').textContent = `(${this.selectedServiceData.unit})`;
-                document.getElementById('qtyInput').value = 1;
-                this.updateQtyPreview();
-            }
-        }
-
-        // Haptic
-        if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
-
-        this.checkFormReady();
+    onTenantSearch(val) {
+        this.tenantSearch = val;
+        document.getElementById('tenantCards').innerHTML = this.renderTenantCards();
         refreshIcons();
     },
 
-    adjustQty(delta) {
-        const input = document.getElementById('qtyInput');
-        let val = parseFloat(input.value) || 0;
-        val = Math.max(0, val + delta);
-        input.value = val;
-        this.updateQtyPreview();
-        if (tg?.HapticFeedback) tg.HapticFeedback.selectionChanged();
-    },
+    // ══════════════════════════════
+    //  INVOICES
+    // ══════════════════════════════
+    renderInvoices() {
+        const months = [...new Set(this.invoices.map(i => i.month))]
+            .filter(Boolean).sort().reverse();
 
-    updateQtyPreview() {
-        const preview = document.getElementById('qtyPreview');
-        const qty = parseFloat(document.getElementById('qtyInput').value) || 0;
-        if (this.selectedServiceData && qty > 0) {
-            const total = qty * this.selectedServiceData.price;
-            preview.textContent = `${qty} × ${this.formatVND(this.selectedServiceData.price)} = ${this.formatVND(total)}`;
-        } else {
-            preview.textContent = '';
-        }
-    },
-
-    checkFormReady() {
-        const ready = this.selectedRoomId && this.selectedServiceId;
-        document.getElementById('submitBtn').disabled = !ready;
-    },
-
-    // ─── Submit ───
-    async submitForm(e) {
-        e.preventDefault();
-
-        if (!this.selectedRoomId || !this.selectedServiceId) {
-            this.toast('Vui lòng chọn phòng và dịch vụ!', 'warning');
-            return;
+        if (!this.invoiceMonth || !months.includes(this.invoiceMonth)) {
+            this.invoiceMonth = months[0] || null;
         }
 
-        const month = this.getSelectedMonth();
-        const qty = parseFloat(document.getElementById('qtyInput').value) || 1;
-        const svc = this.selectedServiceData;
+        const monthsHTML = months.map(m => `
+            <button class="month-chip ${this.invoiceMonth === m ? 'active' : ''}"
+                    onclick="App.setInvoiceMonth('${m}')">
+                ${formatMonth(m)}
+            </button>`).join('');
 
-        // Create roomService record
-        const id = 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
-        const data = {
-            id: id,
-            roomId: this.selectedRoomId,
-            serviceId: this.selectedServiceId,
-            quantity: qty,
-            type: 'onetime',
-            month: month,
-            createdAt: new Date().toISOString(),
-            source: 'telegram-webapp' // Track origin
-        };
+        const filtered = this.invoices.filter(i => i.month === this.invoiceMonth);
+        const paidCount = filtered.filter(i => i.paid).length;
+        const unpaidCount = filtered.filter(i => !i.paid).length;
 
-        try {
-            // Write to Firebase
-            await db.collection('roomServices').doc(id).set(data);
+        const cards = filtered.length === 0
+            ? `<div class="empty-state"><i data-lucide="receipt"></i><p>Chưa có hóa đơn nào</p></div>`
+            : filtered.map(inv => {
+                const room = this.rooms.find(r => r.id === inv.roomId);
+                const tenantName = inv.tenantNames ||
+                    this.tenants.find(t => t.roomId === inv.roomId && !t.moveOutDate)?.name || '—';
+                const total = (inv.roomPrice || 0) + (inv.electricCost || 0) +
+                    (inv.waterCost || 0) + (inv.serviceCost || 0) - (inv.discount || 0);
 
-            // Also sync invoices for this room
-            await this.syncInvoiceForRoom(this.selectedRoomId, month, data);
-
-            // Show success
-            const room = this.rooms.find(r => r.id === this.selectedRoomId);
-            const detail = `${room?.name || '—'} · ${svc?.name || '—'} · SL: ${qty}\n${this.formatVND(qty * (svc?.price || 0))}`;
-            this.showSuccess(detail);
-
-            // Haptic
-            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-
-            // Update local data
-            this.roomServices.push(data);
-            this.updateStats();
-
-            // Reset form
-            this.resetForm();
-        } catch (err) {
-            console.error('Submit failed:', err);
-            this.toast('Lỗi khi lưu! Thử lại sau.', 'error');
-            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-        }
-    },
-
-    async syncInvoiceForRoom(roomId, month) {
-        try {
-            // Find existing invoice for this room+month
-            const snapshot = await db.collection('invoices')
-                .where('roomId', '==', roomId)
-                .where('month', '==', month)
-                .get();
-
-            if (snapshot.empty) return; // No invoice to update
-
-            // Calc new service cost
-            const rsSnapshot = await db.collection('roomServices')
-                .where('roomId', '==', roomId)
-                .get();
-
-            let svcCost = 0;
-            rsSnapshot.forEach(doc => {
-                const rs = doc.data();
-                // Include recurring and onetime for this month
-                if (rs.type === 'onetime' && rs.month !== month) return;
-                const svc = this.services.find(s => s.id === rs.serviceId);
-                if (svc) svcCost += svc.price * (rs.quantity || 1);
-            });
-
-            // Update each invoice
-            snapshot.forEach(async (doc) => {
-                const inv = doc.data();
-                if (inv.paid) return; // Don't touch paid invoices
-                const newTotal = (inv.roomPrice || 0) + (inv.electricCost || 0) + (inv.waterCost || 0) + svcCost;
-                await db.collection('invoices').doc(doc.id).update({
-                    serviceCost: svcCost,
-                    total: newTotal,
-                    updatedAt: new Date().toISOString()
-                });
-                console.log(`[Sync] Updated invoice ${doc.id}: svcCost=${svcCost}, total=${newTotal}`);
-            });
-        } catch (err) {
-            console.warn('[Sync] Invoice sync failed:', err);
-        }
-    },
-
-    resetForm() {
-        this.selectedRoomId = null;
-        this.selectedServiceId = null;
-        this.selectedServiceData = null;
-        document.getElementById('selectedRoom').value = '';
-        document.getElementById('selectedService').value = '';
-        document.getElementById('qtyInput').value = 1;
-        document.getElementById('qtyGroup').style.display = 'none';
-        document.getElementById('qtyPreview').textContent = '';
-        document.getElementById('submitBtn').disabled = true;
-
-        document.querySelectorAll('.room-chip').forEach(c => c.classList.remove('selected'));
-        document.querySelectorAll('.service-item').forEach(s => s.classList.remove('selected'));
-    },
-
-    // ─── Success Overlay ───
-    showSuccess(detail) {
-        document.getElementById('successDetail').textContent = detail;
-        document.getElementById('successOverlay').classList.add('active');
-        refreshIcons();
-        setTimeout(() => {
-            document.getElementById('successOverlay').classList.remove('active');
-        }, 2000);
-    },
-
-    // ─── Stats ───
-    updateStats() {
-        const occupiedRooms = this.rooms.filter(r => r.status === 'occupied');
-        document.getElementById('statRooms').textContent = `${occupiedRooms.length} phòng`;
-        document.getElementById('statServices').textContent = `${this.services.length} dịch vụ`;
-
-        const now = new Date();
-        const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const thisMonthCount = this.roomServices.filter(rs => rs.type === 'onetime' && rs.month === curMonth).length;
-        document.getElementById('statThisMonth').textContent = `${thisMonthCount} PS tháng này`;
-    },
-
-    // ─── History ───
-    renderHistory() {
-        const container = document.getElementById('historyList');
-
-        // Get onetime services sorted by date
-        const onetime = this.roomServices
-            .filter(rs => rs.type === 'onetime')
-            .sort((a, b) => (b.month || '').localeCompare(a.month || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-
-        if (onetime.length === 0) {
-            container.innerHTML = `
-                <div class="history-empty">
-                    <i data-lucide="inbox"></i>
-                    <p>Chưa có phát sinh nào</p>
-                </div>`;
-            refreshIcons();
-            return;
-        }
-
-        // Group by month
-        const groups = {};
-        onetime.forEach(rs => {
-            const m = rs.month || 'unknown';
-            if (!groups[m]) groups[m] = [];
-            groups[m].push(rs);
-        });
-
-        let html = '';
-        const now = new Date();
-        const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-        const TWENTY_MIN = 20 * 60 * 1000;
-
-        Object.entries(groups).forEach(([month, items]) => {
-            const [y, m] = month.split('-');
-            const label = month === curMonth ? 'Tháng này' : `Tháng ${parseInt(m)}/${y}`;
-            const groupTotal = items.reduce((sum, rs) => {
-                const svc = this.services.find(s => s.id === rs.serviceId);
-                return sum + (svc ? svc.price * (rs.quantity || 1) : 0);
-            }, 0);
-            html += `<div class="history-month-label">${label} · ${items.length} mục · ${this.formatVND(groupTotal)}</div>`;
-
-            items.forEach(rs => {
-                const room = this.rooms.find(r => r.id === rs.roomId);
-                const svc = this.services.find(s => s.id === rs.serviceId);
-                const tenant = this.getTenantForRoom(rs.roomId);
-                const icon = svc?.icon || 'package';
-                const unitPrice = svc?.price || 0;
-                const amount = unitPrice * (rs.quantity || 1);
-                const createdDate = rs.createdAt ? new Date(rs.createdAt) : null;
-                const dateStr = createdDate ? createdDate.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
-                const timeStr = createdDate ? createdDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : '';
-                const source = rs.source === 'telegram-webapp' ? '📱 Telegram' : '💻 Desktop';
-
-                // Check if within 20 minutes
-                const canDelete = createdDate && (now.getTime() - createdDate.getTime()) < TWENTY_MIN;
-                const minutesAgo = createdDate ? Math.floor((now.getTime() - createdDate.getTime()) / 60000) : null;
-                const timeAgoLabel = minutesAgo !== null && minutesAgo < 20 ? `${minutesAgo} phút trước` : '';
-
-                html += `
-                    <div class="history-card" data-id="${rs.id}">
-                        <div class="hc-header">
-                            <div class="hc-icon" style="background:${canDelete ? 'var(--primary)' : 'var(--tg-theme-hint-color)'}">
-                                <i data-lucide="${icon}"></i>
-                            </div>
-                            <div class="hc-title-area">
-                                <div class="hc-name">${svc?.name || '—'}</div>
-                                <div class="hc-source">${source}${timeAgoLabel ? ' · ' + timeAgoLabel : ''}</div>
-                            </div>
-                            <div class="hc-amount">${this.formatVND(amount)}</div>
+                return `
+                <div class="inv-card">
+                    <div class="inv-card-header">
+                        <div>
+                            <div class="inv-card-room-num">${room?.name || '—'}</div>
+                            <div class="inv-card-tenant-name">${tenantName}</div>
                         </div>
-                        <div class="hc-details">
-                            <div class="hc-row"><span>🏠 Phòng</span><strong>${room?.name || '—'}</strong></div>
-                            <div class="hc-row"><span>👤 Người thuê</span><strong>${tenant?.name || '—'}</strong></div>
-                            <div class="hc-row"><span>📦 Số lượng</span><strong>${rs.quantity} × ${this.formatVND(unitPrice)}/${svc?.unit || ''}</strong></div>
-                            <div class="hc-row"><span>📅 Ngày ghi</span><strong>${dateStr}${timeStr ? ' · ' + timeStr : ''}</strong></div>
+                        <div class="inv-paid-badge ${inv.paid ? 'paid' : 'unpaid'}">
+                            <i data-lucide="${inv.paid ? 'check-circle' : 'clock'}"></i>
+                            ${inv.paid ? 'Đã TT' : 'Chưa TT'}
                         </div>
-                        ${canDelete ? `
-                        <div class="hc-actions">
-                            <button class="hc-del-btn" onclick="App.deleteService('${rs.id}', '${rs.roomId}', '${rs.month}')">
-                                <i data-lucide="trash-2"></i> Xóa (còn ${20 - minutesAgo}p)
-                            </button>
+                    </div>
+                    <div class="inv-card-body">
+                        <div class="inv-line">
+                            <span class="inv-line-label"><i data-lucide="home"></i> Tiền phòng</span>
+                            <span class="inv-line-value">${formatVND(inv.roomPrice || 0)}</span>
+                        </div>
+                        <div class="inv-line">
+                            <span class="inv-line-label"><i data-lucide="zap"></i> Điện (${inv.electricUsage || 0} kWh)</span>
+                            <span class="inv-line-value">${formatVND(inv.electricCost || 0)}</span>
+                        </div>
+                        <div class="inv-line">
+                            <span class="inv-line-label"><i data-lucide="droplets"></i> Nước (${inv.waterUsage || 0} m³)</span>
+                            <span class="inv-line-value">${formatVND(inv.waterCost || 0)}</span>
+                        </div>
+                        ${(inv.serviceCost || 0) > 0 ? `
+                        <div class="inv-line">
+                            <span class="inv-line-label"><i data-lucide="package"></i> Dịch vụ</span>
+                            <span class="inv-line-value">${formatVND(inv.serviceCost)}</span>
                         </div>` : ''}
-                    </div>`;
-            });
-        });
+                        ${(inv.discount || 0) > 0 ? `
+                        <div class="inv-line">
+                            <span class="inv-line-label" style="color:var(--success)"><i data-lucide="tag"></i> Giảm giá</span>
+                            <span class="inv-line-value" style="color:var(--success)">-${formatVND(inv.discount)}</span>
+                        </div>` : ''}
+                    </div>
+                    <div class="inv-total-row">
+                        <span class="inv-total-label">Tổng cộng</span>
+                        <span class="inv-total-value">${formatVND(total)}</span>
+                    </div>
+                </div>`;
+            }).join('');
 
-        container.innerHTML = html;
+        return `
+        <div class="invoices-wrap">
+            <div class="month-filter-row">${monthsHTML || '<div style="color:var(--text-muted);font-size:13px">Chưa có dữ liệu</div>'}</div>
 
-        // Update subtitle
-        document.getElementById('historySubtitle').textContent =
-            `${onetime.length} phát sinh · ${this.formatVND(this.calcTotal(onetime))}`;
+            ${filtered.length > 0 ? `
+            <div class="inv-summary-row">
+                <div class="inv-summary-chip paid">
+                    <div class="inv-summary-val">${paidCount}</div>
+                    <div class="inv-summary-lbl">Đã thanh toán</div>
+                </div>
+                <div class="inv-summary-chip unpaid">
+                    <div class="inv-summary-val">${unpaidCount}</div>
+                    <div class="inv-summary-lbl">Chưa thanh toán</div>
+                </div>
+            </div>` : ''}
 
-        refreshIcons();
+            ${cards}
+        </div>`;
     },
 
-    calcTotal(items) {
-        return items.reduce((sum, rs) => {
-            const svc = this.services.find(s => s.id === rs.serviceId);
-            return sum + (svc ? svc.price * (rs.quantity || 1) : 0);
-        }, 0);
+    setInvoiceMonth(month) {
+        this.invoiceMonth = month;
+        this.switchTab('invoices');
     },
-
-    // ─── Delete Service (only within 20 minutes) ───
-    async deleteService(id, roomId, month) {
-        // Double-check time limit
-        const rs = this.roomServices.find(r => r.id === id);
-        if (rs?.createdAt) {
-            const age = Date.now() - new Date(rs.createdAt).getTime();
-            if (age > 20 * 60 * 1000) {
-                this.toast('Đã quá 20 phút, không thể xóa!', 'warning');
-                if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                this.renderHistory();
-                return;
-            }
-        }
-
-        if (!confirm('Xóa dịch vụ phát sinh này?')) return;
-
-        try {
-            await db.collection('roomServices').doc(id).delete();
-            this.roomServices = this.roomServices.filter(rs => rs.id !== id);
-            await this.syncInvoiceForRoom(roomId, month);
-
-            if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-            this.toast('Đã xóa phát sinh!', 'success');
-            this.updateStats();
-            this.renderHistory();
-        } catch (err) {
-            console.error('Delete failed:', err);
-            this.toast('Lỗi khi xóa!', 'error');
-        }
-    },
-
-    // ─── Utilities ───
-    formatVND(amount) {
-        const n = Number(amount) || 0;
-        return new Intl.NumberFormat('vi-VN').format(n) + '₫';
-    },
-
-    toast(message, type = 'success') {
-        // Remove existing
-        document.querySelectorAll('.toast').forEach(t => t.remove());
-
-        const toast = document.createElement('div');
-        toast.className = `toast toast-${type}`;
-        toast.textContent = message;
-        document.body.appendChild(toast);
-
-        requestAnimationFrame(() => {
-            toast.classList.add('show');
-        });
-
-        setTimeout(() => {
-            toast.classList.remove('show');
-            setTimeout(() => toast.remove(), 300);
-        }, 2500);
-    }
 };
 
 // ─── Start ───
 document.addEventListener('DOMContentLoaded', async () => {
-    // Load tenants too for room names
-    try {
-        const snapshot = await db.collection('tenants').get();
-        App.tenants = [];
-        snapshot.forEach(doc => App.tenants.push({ ...doc.data(), id: doc.id }));
-    } catch (e) {
-        App.tenants = [];
-    }
-
     await App.init();
-
-    // Listen for qty changes
-    document.getElementById('qtyInput').addEventListener('input', () => {
-        App.updateQtyPreview();
-    });
 });
