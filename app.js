@@ -35,6 +35,7 @@ const App = {
     selectedRoomId: null,
     selectedServiceId: null,
     selectedServiceData: null,
+    _unsubRoomServices: null, // onSnapshot unsubscribe fn
 
     // ─── Access Control ───
     // Primary owners (same as bot .env OWNER_CHAT_IDS)
@@ -57,13 +58,15 @@ const App = {
                 return;
             }
 
-            // ─── Step 2: Load data from Firebase ───
+            // ─── Step 2: Load static data (rooms, services, settings ít thay đổi) ───
             await Promise.all([
                 this.loadCollection('rooms'),
                 this.loadCollection('services'),
-                this.loadCollection('roomServices'),
                 this.loadSettings()
             ]);
+
+            // ─── Step 3: onSnapshot cho roomServices → realtime! ───
+            this.startRoomServicesListener();
 
             this.renderMonthPicker();
             this.renderRooms();
@@ -145,6 +148,26 @@ const App = {
     async loadSettings() {
         const doc = await db.collection('settings').doc('main').get();
         this.settings = doc.exists ? doc.data() : {};
+    },
+
+    // ─── onSnapshot cho roomServices (realtime) ───
+    startRoomServicesListener() {
+        if (this._unsubRoomServices) return; // đã chạy rồi
+        this._unsubRoomServices = db.collection('roomServices').onSnapshot(snapshot => {
+            const items = [];
+            snapshot.forEach(doc => items.push({ ...doc.data(), id: doc.id }));
+            this.roomServices = items;
+            this.updateStats();
+            // Nếu đang mở history screen thì tự render lại
+            const historyScreen = document.getElementById('historyScreen');
+            if (historyScreen && historyScreen.classList.contains('active')) {
+                this.renderHistory();
+            }
+            console.log(`[Firebase] 🔄 roomServices updated: ${items.length} items`);
+        }, err => {
+            console.warn('[Firebase] roomServices listener error:', err.message);
+        });
+        console.log('[Firebase] 👁️ roomServices onSnapshot active');
     },
 
     // ─── Screen management ───
