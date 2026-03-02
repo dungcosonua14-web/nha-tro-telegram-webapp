@@ -44,7 +44,7 @@ const App = {
 
     // ─── State ───
     currentTab: 'dashboard',
-    tenantFilter: 'all',
+    tenantFilter: 'hasRoom',
     tenantSearch: '',
     invoiceMonth: null,
 
