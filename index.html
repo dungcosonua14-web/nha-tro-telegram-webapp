@@ -4,8 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Nhà Trọ Eden</title>
-    <meta name="description" content="Quản lý nhà trọ Eden qua Telegram">
+    <title>Nhà Trọ Eden - Dịch vụ phát sinh</title>
+    <meta name="description" content="Ghi dịch vụ phát sinh nhà trọ qua Telegram">
 
     <!-- Telegram Web App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -27,73 +27,181 @@
 
 <body>
     <div id="app">
-
         <!-- Loading screen -->
         <div id="loadingScreen" class="screen active">
             <div class="loading-content">
-                <div class="loading-logo">🏠</div>
                 <div class="loading-spinner"></div>
                 <p class="loading-text">Đang kết nối...</p>
             </div>
         </div>
 
-        <!-- Main App -->
+        <!-- Main screen -->
         <div id="mainScreen" class="screen">
-
             <!-- Header -->
             <header class="app-header">
-                <div class="header-brand">
-                    <div class="header-icon-wrap">🏠</div>
+                <div class="header-left">
+                    <div class="header-icon">
+                        <i data-lucide="zap"></i>
+                    </div>
                     <div>
-                        <div class="header-title">Nhà Trọ Eden</div>
-                        <div class="header-subtitle" id="headerSubtitle">Đang tải...</div>
+                        <h1 class="header-title">Dịch vụ phát sinh</h1>
+                        <p class="header-subtitle" id="headerSubtitle">Nhà Trọ Eden</p>
                     </div>
                 </div>
-                <div class="header-user" id="headerUser"></div>
+                <div class="header-right">
+                    <button class="header-history-btn" id="historyBtn" onclick="App.showHistory()">
+                        <i data-lucide="clock"></i>
+                        <span>Lịch sử</span>
+                    </button>
+                </div>
             </header>
 
-            <!-- Tab Content -->
-            <div class="tab-content" id="tabContent">
-                <!-- Rendered by JS -->
+            <!-- Stats bar -->
+            <div class="stats-bar" id="statsBar">
+                <div class="stat-pill">
+                    <i data-lucide="door-open"></i>
+                    <span id="statRooms">0 phòng</span>
+                </div>
+                <div class="stat-pill">
+                    <i data-lucide="package"></i>
+                    <span id="statServices">0 dịch vụ</span>
+                </div>
+                <div class="stat-pill accent">
+                    <i data-lucide="receipt"></i>
+                    <span id="statThisMonth">0 PS tháng này</span>
+                </div>
             </div>
 
-            <!-- Bottom Nav -->
-            <nav class="bottom-nav">
-                <button class="nav-btn active" data-tab="dashboard" onclick="App.switchTab('dashboard')">
-                    <i data-lucide="layout-dashboard"></i>
-                    <span>Tổng quan</span>
-                </button>
-                <button class="nav-btn" data-tab="rooms" onclick="App.switchTab('rooms')">
-                    <i data-lucide="door-open"></i>
-                    <span>Phòng</span>
-                </button>
-                <button class="nav-btn" data-tab="tenants" onclick="App.switchTab('tenants')">
-                    <i data-lucide="users"></i>
-                    <span>Người thuê</span>
-                </button>
-                <button class="nav-btn" data-tab="invoices" onclick="App.switchTab('invoices')">
-                    <i data-lucide="receipt"></i>
-                    <span>Hóa đơn</span>
-                </button>
-            </nav>
+            <!-- Form -->
+            <div class="form-card">
+                <div class="form-card-header">
+                    <div class="form-card-icon">
+                        <i data-lucide="plus-circle"></i>
+                    </div>
+                    <h2>Ghi phát sinh mới</h2>
+                </div>
+
+                <form id="serviceForm" onsubmit="App.submitForm(event)">
+                    <!-- Month picker -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i data-lucide="calendar"></i> Tháng
+                        </label>
+                        <div class="month-picker">
+                            <select class="form-select" name="month" id="selMonth"></select>
+                            <select class="form-select" name="year" id="selYear"></select>
+                        </div>
+                    </div>
+
+                    <!-- Room picker -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i data-lucide="door-open"></i> Phòng
+                        </label>
+                        <div class="room-grid" id="roomGrid">
+                            <!-- Generated dynamically -->
+                        </div>
+                        <input type="hidden" name="roomId" id="selectedRoom" required>
+                    </div>
+
+                    <!-- Service picker -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <i data-lucide="package"></i> Dịch vụ
+                        </label>
+                        <div class="service-list" id="serviceList">
+                            <!-- Generated dynamically -->
+                        </div>
+                        <input type="hidden" name="serviceId" id="selectedService" required>
+                    </div>
+
+                    <!-- Quantity -->
+                    <div class="form-group" id="qtyGroup" style="display:none">
+                        <label class="form-label">
+                            <i data-lucide="hash"></i> Số lượng
+                            <span class="qty-unit" id="qtyUnit"></span>
+                        </label>
+                        <div class="qty-control">
+                            <button type="button" class="qty-btn" onclick="App.adjustQty(-1)">
+                                <i data-lucide="minus"></i>
+                            </button>
+                            <input type="number" class="qty-input" name="quantity" id="qtyInput" value="1" min="0"
+                                step="any" inputmode="decimal">
+                            <button type="button" class="qty-btn" onclick="App.adjustQty(1)">
+                                <i data-lucide="plus"></i>
+                            </button>
+                        </div>
+                        <div class="qty-preview" id="qtyPreview"></div>
+                    </div>
+
+                    <!-- Submit -->
+                    <button type="submit" class="submit-btn" id="submitBtn" disabled>
+                        <i data-lucide="check-circle"></i>
+                        <span>Ghi phát sinh</span>
+                    </button>
+                </form>
+            </div>
+
+
+        </div>
+
+        <!-- History screen -->
+        <div id="historyScreen" class="screen">
+            <header class="app-header">
+                <div class="header-left">
+                    <button class="icon-btn" onclick="App.showMain()">
+                        <i data-lucide="arrow-left"></i>
+                    </button>
+                    <div>
+                        <h1 class="header-title">Lịch sử phát sinh</h1>
+                        <p class="header-subtitle" id="historySubtitle">Tháng này</p>
+                    </div>
+                </div>
+            </header>
+            <div class="history-list" id="historyList">
+                <!-- Generated dynamically -->
+            </div>
         </div>
 
         <!-- Access Denied screen -->
         <div id="deniedScreen" class="screen">
-            <div class="denied-wrap">
-                <div class="denied-icon">🔒</div>
-                <h2 id="deniedTitle">Truy cập bị từ chối</h2>
-                <p id="deniedMessage">Web App này chỉ dành cho người được chủ trọ cấp quyền.</p>
-                <div class="denied-id-box" id="deniedIdBox">
-                    <div class="denied-id-label">Telegram ID của bạn</div>
-                    <div class="denied-id-value" id="deniedUserId">—</div>
-                    <div class="denied-id-name" id="deniedUserName">—</div>
+            <div
+                style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:80vh;padding:32px;text-align:center">
+                <div
+                    style="width:72px;height:72px;border-radius:50%;background:var(--danger-light);display:flex;align-items:center;justify-content:center;margin-bottom:20px">
+                    <i data-lucide="shield-x" style="width:36px;height:36px;color:var(--danger)"></i>
                 </div>
-                <p class="denied-hint">📩 Gửi ID này cho chủ trọ để được thêm quyền qua lệnh <code>/adduser</code> trên
-                    bot.</p>
+                <h2 id="deniedTitle" style="font-size:20px;font-weight:800;margin-bottom:8px">Truy cập bị từ chối</h2>
+                <p id="deniedMessage"
+                    style="color:var(--tg-theme-hint-color);font-size:14px;margin-bottom:24px;max-width:280px">
+                    Web App này chỉ dành cho người được chủ trọ cấp quyền truy cập.
+                </p>
+                <div id="deniedIdBox"
+                    style="background:var(--tg-theme-secondary-bg-color);border-radius:12px;padding:16px 24px;margin-bottom:16px">
+                    <div
+                        style="font-size:11px;font-weight:700;color:var(--tg-theme-hint-color);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">
+                        Telegram ID của bạn</div>
+                    <div id="deniedUserId"
+                        style="font-size:24px;font-weight:900;font-family:monospace;color:var(--primary)">—</div>
+                    <div id="deniedUserName" style="font-size:12px;color:var(--tg-theme-hint-color);margin-top:4px">—
+                    </div>
+                </div>
+                <p style="color:var(--tg-theme-hint-color);font-size:12px;max-width:260px">
+                    📩 Gửi ID này cho chủ trọ để được thêm quyền truy cập qua lệnh <code>/adduser</code> trên bot.
+                </p>
             </div>
         </div>
 
+        <!-- Success overlay -->
+        <div id="successOverlay" class="success-overlay">
+            <div class="success-content">
+                <div class="success-icon">
+                    <i data-lucide="check-circle"></i>
+                </div>
+                <h2 class="success-title">Đã ghi thành công!</h2>
+                <p class="success-detail" id="successDetail"></p>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>
